@@ -1,0 +1,270 @@
+--1 Рассчитайте количество проданных и пропавших продуктов по неделям
+--(для получения названия неделю используйте таблицу dates)
+
+select week_name,
+	sum(quantity_sold) as sold,
+	sum(waste) as waste
+from coffe_shop.dates d  
+left join coffe_shop.pastry_inventory pi2 
+on pi2.transaction_date::date = d.transaction_date 
+group by week_name
+order by week_name;
+
+
+--2 Найдите топ 10 самых продаваемых товаров каждый день и
+--проранжируйте их по дням и кол-ву проданных штук
+
+with quantity_per_day as
+	(select transaction_date,
+			product_name,
+			sum(quantity) as quantity_sold_per_day,
+			row_number() over (partition by transaction_date order by sum(quantity) desc) as rating
+	from coffe_shop.sales_reciepts sr 
+	left join coffe_shop.product p 
+	on sr.product_id = p.product_id 
+	group by transaction_date,
+			product_name
+	order by transaction_date, quantity_sold_per_day desc)
+
+select *
+from quantity_per_day
+where rating <= 10;
+
+--3 Найдите разницу между выручкой в текущий и предыдущий день
+--!!! в примере вывода результата в полях sales_amount, prev_sales_amount, difference_sales_amount
+--очень много знаков после запятой. почему? ведь в line_item_amount максимум два знака после запятой
+--из-за этого разница в результатах percent_difference в строках 7-8
+
+with temp_query as
+	(select transaction_date,
+			sum(line_item_amount::numeric) as sales_amount,
+			lag(sum(line_item_amount::numeric)) over (order by transaction_date) as prev_sales_amount
+	from coffe_shop.sales_reciepts 
+	group by transaction_date
+	order by transaction_date)
+	
+select *,
+		sales_amount - prev_sales_amount as difference_sales_amount,
+		round((sales_amount - prev_sales_amount)/sales_amount*100) as percent_difference
+from temp_query;
+
+	
+--4 Посчитать кумулятивную сумму от количества проданных продуктов каждый день
+
+with temp_table as
+	(select transaction_date,
+			sum(quantity) as quantity 
+	from coffe_shop.sales_reciepts
+	group by transaction_date
+	order by transaction_date)
+	
+select *,
+		sum(quantity) over (rows between unbounded preceding and current row) as cum_sum_quantity
+from temp_table;
+
+--5 Найдите разницу между максимальной и минимальной ценой товара в
+--категории (обратите внимание, что цена должна быть числовая, без знака $)
+
+with temp_table as
+	(select product_category,
+			product_type,
+			product_name,
+			substring(current_retail_price, 2)::numeric as retail_price,
+			max(substring(current_retail_price, 2)::numeric) over (partition by product_category) as max_price_category,
+		min(substring(current_retail_price, 2)::numeric) over (partition by product_category) as min_price_category
+		from coffe_shop.product
+		order by product_category)
+			
+select *,
+		max_price_category - min_price_category as difference
+from temp_table;
+
+--6 Найти топ-1 product_type для каждой product_category с максимальной
+--суммой транзакций. Например, в категории Bakery самый прибыльный
+--(т.е. максимальная сумма транзакций) тип продукта - Scone
+
+with temp_table as	
+	(select product_category,
+			product_type,
+			sum(line_item_amount) as sum_trans,
+			row_number() over (partition by product_category order by sum(line_item_amount) desc) as rating
+	from coffe_shop.sales_reciepts sr
+	left join coffe_shop.product p
+	on sr.product_id = p.product_id 
+	group by product_category,
+			product_type
+	order by product_category, sum(line_item_amount) desc)
+	
+select product_category,
+		product_type
+from temp_table
+where rating = 1;
+
+--7 Сделайте рейтинг работников кофейни по количеству обработанных
+--заказов (транзакций) по каждому дню. Кто из работников обработал
+--максимальное кол-во заказов 2019-04-05?
+
+with temp_table as
+	(select transaction_date,
+			sr.staff_id,
+			concat(first_name, ' ', last_name) as staff_name,
+			count(transaction_id) as trans_count,
+			row_number() over (partition by transaction_date order by count(transaction_id) desc) as rating
+	from coffe_shop.sales_reciepts sr
+	left join  coffe_shop.staff s
+	on sr.staff_id = s.staff_id 
+	group by transaction_date,
+			sr.staff_id,
+			concat(first_name, ' ', last_name)
+	order by transaction_date, count(transaction_id) desc)
+	
+select *
+from temp_table
+where transaction_date = '2019-04-05' and rating = 1;
+
+--8 Напишите запрос для сравнения общей суммы транзакций на каждый
+--день в сравнении с днями предыдущей недели
+
+with temp_table as
+	(select transaction_date,
+			round(sum(line_item_amount::numeric)) as trans_amount		
+	from coffe_shop.sales_reciepts
+	group by transaction_date
+	order by transaction_date)
+	
+select *,
+		lag(trans_amount, 7) over (order by transaction_date) as trans_amount_prev_week
+from temp_table;
+
+
+
+--Дополнительные задания
+--1 * Собрать «финансовый отчет». Вывести общую сумму и количество
+--проданных товаров за весь период, сумму и количество по магазинам,
+--по категориям товаров в каждом магазине.
+--Специально все расчеты сделаны в табличном выражении, чтобы в 
+--основном запросе можно было накладывать любые условия фильтрации
+
+with temp_table as
+	(select sales_outlet_id,
+			product_category,
+			sum(line_item_amount::numeric) as sales_amount_cat,
+			sum(quantity) as quantity_amount_cat,
+			sum(sum(line_item_amount::numeric)) over (partition by sales_outlet_id) as sales_amount_outlet,
+		sum(sum(quantity)) over (partition by sales_outlet_id) as quantity_amount_outlet,
+		sum(sum(line_item_amount::numeric)) over () as sales_amount_all,
+		sum(sum(quantity)) over () as quantity_amount_all
+	from coffe_shop.sales_reciepts sr
+	left join coffe_shop.product p
+	on sr.product_id = p.product_id 
+	group by sales_outlet_id,
+			product_category
+	order by sales_outlet_id,
+			product_category)
+	
+select *	
+from temp_table;
+
+
+--2 * Посчитать нарастающую сумму транзакций по дням для каждого
+--магазина и группе товаров. 
+--Определить, на какой день будет (или не
+--будет) достигнута цель по продажам в данной категории (цели хранятся
+--в таблице sales_targets, нужно преобразовать ее формат и сопоставить
+--столбцы из таблицы с полем product_group в таблице product).
+
+
+WITH 
+temp_table_1 as (select sales_outlet_id,
+						product_group,
+						transaction_date,
+						sum(line_item_amount::numeric) as sales_amount_per_day
+				from coffe_shop.sales_reciepts sr
+				left join coffe_shop.product p
+				on sr.product_id = p.product_id 
+				group by sales_outlet_id,
+						product_group,
+						transaction_date
+				order by sales_outlet_id,
+						product_group,	
+						transaction_date),
+
+temp_table_2 as (select *,
+				sum(sales_amount_per_day) over (partition by sales_outlet_id, product_group rows between unbounded preceding and current row) as com_sum,
+				case when sales_outlet_id = 3 and product_group = 'Beverages' then (select beverage_goal 
+																					from coffe_shop.sales_targets 
+																					where sales_outlet_id = 3)
+					when sales_outlet_id = 3 and product_group = 'Food' then (select food_goal 
+																					from coffe_shop.sales_targets 
+																					where sales_outlet_id = 3)
+					when sales_outlet_id = 3 and product_group = 'Merchandise' then (select merchandise_goal 
+																					from coffe_shop.sales_targets 
+																					where sales_outlet_id = 3)
+					when sales_outlet_id = 3 and product_group = 'Whole Bean/Teas' then (select beans_goal 
+																					from coffe_shop.sales_targets 
+																					where sales_outlet_id = 3)
+					when sales_outlet_id = 5 and product_group = 'Beverages' then (select beverage_goal 
+																					from coffe_shop.sales_targets 
+																					where sales_outlet_id = 5)
+					when sales_outlet_id = 5 and product_group = 'Food' then (select food_goal 
+																					from coffe_shop.sales_targets 
+																					where sales_outlet_id = 5)
+					when sales_outlet_id = 5 and product_group = 'Merchandise' then (select merchandise_goal 
+																					from coffe_shop.sales_targets 
+																					where sales_outlet_id = 5)
+					when sales_outlet_id = 5 and product_group = 'Whole Bean/Teas' then (select beans_goal 
+																					from coffe_shop.sales_targets 
+																					where sales_outlet_id = 5)
+					when sales_outlet_id = 8 and product_group = 'Beverages' then (select beverage_goal 
+																					from coffe_shop.sales_targets 
+																					where sales_outlet_id = 8)
+					when sales_outlet_id = 8 and product_group = 'Food' then (select food_goal 
+																					from coffe_shop.sales_targets 
+																					where sales_outlet_id = 8)
+					when sales_outlet_id = 8 and product_group = 'Merchandise' then (select merchandise_goal 
+																					from coffe_shop.sales_targets 
+																					where sales_outlet_id = 8)
+					when sales_outlet_id = 8 and product_group = 'Whole Bean/Teas' then (select beans_goal 
+																					from coffe_shop.sales_targets 
+																					where sales_outlet_id = 8)
+				end as targets,
+				row_number() over (partition by sales_outlet_id, product_group order by transaction_date) as days
+				from temp_table_1
+				where product_group in ('Beverages', 'Food', 'Merchandise', 'Whole Bean/Teas')),
+	
+temp_table_3 as (select *,
+				row_number() over (partition by sales_outlet_id, product_group order by transaction_date) as rating
+				from temp_table_2
+				where com_sum > targets)
+				
+select sales_outlet_id,
+		product_group,
+		transaction_date,
+		com_sum,
+		targets,
+		days
+from temp_table_3
+where rating = 1;
+
+
+--3 * Посчитать скользящее среднее значение по дням для транзакций
+--отдельно в каждом магазине и категории товара
+
+with temp_table as
+	(select sales_outlet_id,
+			product_category,
+			transaction_date,
+			sum(line_item_amount::numeric) as sales_amount_per_day
+	from coffe_shop.sales_reciepts sr
+	left join coffe_shop.product p
+	on sr.product_id = p.product_id 
+	group by sales_outlet_id,
+			product_category,
+			transaction_date
+	order by sales_outlet_id,
+			product_category,
+			transaction_date)
+			
+select *,
+	round(avg(sales_amount_per_day) over (partition by sales_outlet_id, product_category rows between 1 preceding and 1 following),2) as roll_avg
+from temp_table;

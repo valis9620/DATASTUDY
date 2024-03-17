@@ -1,0 +1,187 @@
+--1. Рассчитайте кол-во транзакций по дням. Вывести результат в формате как на примере ниже
+
+SELECT date_part('year', transaction_date::date) AS date_year,
+       date_part('month', transaction_date::date) AS date_month,
+       date_part('day', transaction_date::date) AS date_day,
+       count(transaction_id) AS sale_qty
+FROM coffe_shop.sales_reciepts
+GROUP BY transaction_date
+ORDER BY date_day;
+
+--2. Рассчитать сумму заказов (line_item_amount) в каждом городе (store_city) и магазине. 
+--В запросе выведите город, адрес магазина и сумму заказов. Сумму округлите с помощью функции ROUND().
+--Отсортировать результат в порядке убывания сумм заказов
+
+SELECT so.store_city,
+       so.store_address,
+       round(sum(sr.line_item_amount)::double precision) AS sale_amount
+FROM coffe_shop.sales_reciepts sr
+JOIN coffe_shop.sales_outlet so ON sr.sales_outlet_id = so.sales_outlet_id
+GROUP BY so.store_city,
+         so.store_address
+ORDER BY sale_amount;
+
+--3. Выведите только те названия регионов (neighborhood), где продавался
+--продукт “Columbian Medium Roast” с последней датой продажи в регионе.
+
+SELECT so.neighborhood,
+       max(sr.transaction_date) AS last_transaction
+FROM sales_reciepts sr
+JOIN product p ON sr.product_id = p.product_id
+JOIN sales_outlet so ON sr.sales_outlet_id = so.sales_outlet_id
+WHERE product_name = 'Columbian Medium Roast'
+GROUP BY so.neighborhood
+ORDER BY so.neighborhood;
+
+--4. Вывести электронные адреса клиентов и определить их домены с
+--помощью функций работы со строками
+
+SELECT email,
+       substring(email, POSITION ('@' in email)+1) AS email_domain
+FROM customer c;
+
+--5 * Разделить имя клиентов на имя и фамилию, отредактировать номер
+--карты лояльности, убрав пробелы. Вывести количество транзакций
+--(transaction_id) для каждого клиента, отсортировать по убыванию.
+--Подсказка: для разделения имени и фамилию клиента необходимо будет
+--использовать функцию substr и instr
+
+SELECT customer_name,
+       substring(customer_name, split_part(customer_name, ' ', 1)) AS first_name,
+       substring(customer_name, split_part(customer_name, ' ', 2)) AS last_name,
+       loyalty_card_number,
+       translate(loyalty_card_number, '- ', '') AS loyalty_card_number_new_format,
+       count(transaction_id) AS transactions_qty
+FROM customer c
+JOIN sales_reciepts sr ON c.customer_id = sr.customer_id
+GROUP BY customer_name,
+         loyalty_card_number
+ORDER BY transactions_qty DESC;
+
+--6. Собрать витрину данных из нужных таблиц с выводом атрибутов как
+--на картинке ниже. Для поля gender изменить значения по условию:
+--Если gender = ‘M’, заменить на ‘Male’,
+--Если gender = ‘F’, заменить на ‘Female’,
+--В других случаях проставить ‘Not Defined’
+--Для написания условий поля gender используйте конструкцию CASE
+
+SELECT sr.transaction_date,
+       sr.sales_outlet_id,
+       so.store_address,
+       p.product_id,
+       p.product_name,
+       c.customer_id,
+       c.customer_name,
+       CASE
+           WHEN gender = 'F' THEN 'Female'
+           WHEN gender = 'M' THEN 'Male'
+           ELSE 'Not defined'
+       END AS gender,
+       sr.unit_price,
+       sr.quantity,
+       sr.line_item_amount
+FROM sales_reciepts sr
+LEFT JOIN sales_outlet so ON sr.sales_outlet_id = so.sales_outlet_id
+LEFT JOIN product p ON sr.product_id = p.product_id
+LEFT JOIN customer c ON sr.customer_id = c.customer_id
+ORDER BY sr.transaction_date;
+
+--7. Используя предыдущий запрос в качестве табличного выражения,
+--посчитайте выручку (по полю line_item_amount) и кол-во проданных
+--товаров по магазинам на каждый день.
+
+WITH transactions AS
+  (SELECT sr.transaction_date,
+          sr.sales_outlet_id,
+          so.store_address,
+          p.product_id,
+          p.product_name,
+          c.customer_id,
+          c.customer_name,
+          CASE
+              WHEN gender = 'F' THEN 'Female'
+              WHEN gender = 'M' THEN 'Male'
+              ELSE 'Not defined'
+          END AS gender,
+          sr.unit_price,
+          sr.quantity,
+          sr.line_item_amount
+   FROM sales_reciepts sr
+   LEFT JOIN sales_outlet so ON sr.sales_outlet_id = so.sales_outlet_id
+   LEFT JOIN product p ON sr.product_id = p.product_id
+   LEFT JOIN customer c ON sr.customer_id = c.customer_id
+   ORDER BY sr.transaction_date)
+
+SELECT transaction_date,
+       sales_outlet_id,
+       sum(line_item_amount) AS total_amount,
+       sum(quantity) AS total_quantity
+FROM transactions
+GROUP BY transaction_date,
+         sales_outlet_id
+ORDER BY transaction_date;
+
+--8 Посчитать количество клиентов по поколениям
+
+SELECT g.generation,
+       count(customer_id) AS customers_count
+FROM customer c
+JOIN generations g ON c.birth_year = g.birth_year
+GROUP BY g.generation
+ORDER BY customers_count DESC;
+
+--9 Сделать справочник клиентов. Посчитать возраст клиентов, разделить
+--имя и фамилию на 2 отдельных поля
+
+SELECT customer_id,
+       customer_name AS customer_full_name,
+       substring(customer_name, split_part(customer_name, ' ', 1)) AS customer_name,
+       substring(customer_name, split_part(customer_name, ' ', 2)) AS customer_surname,
+       birthdate,
+       age(now()::date, birthdate::date) AS customer_age
+FROM customer c;
+
+--10 Сделать анализ покупателей и разделить их по категориям. 
+--Посчитать количество транзакций, сделанных каждым покупателем. 
+--Разделить их на категории: 
+--Частые гости (>= 23 транзакций), 
+--Редкие посетители (< 10 транзакций), 
+--Стандартные посетители (все остальные)
+
+SELECT sr.customer_id,
+       customer_name,
+       count(transaction_id) AS transactions,
+       CASE
+           WHEN count(transaction_id) >= 23 THEN 'Частый гость'
+           WHEN count(transaction_id) < 10 THEN 'Редкий посетитель'
+           ELSE 'Стандартный посетитель'
+       END AS customer_category
+FROM sales_reciepts sr
+JOIN customer c ON sr.customer_id = c.customer_id
+GROUP BY sr.customer_id,
+         customer_name
+ORDER BY transactions DESC;
+
+--11 Преобразуйте дату транзакции в нужный формат: год, месяц, день.
+--Приведите названия продуктов к стандартному виду в нижнем регистре
+
+SELECT sr.transaction_date,
+       date_part('year', transaction_date::date) AS trans_year,
+       date_part('month', transaction_date::date) AS trans_month,
+       date_part('day', transaction_date::date) AS trans_day,
+       lower(p.product_name) AS product_name
+FROM sales_reciepts sr
+JOIN product p ON sr.product_id = p.product_id
+ORDER BY sr.transaction_date;
+
+--12 Посчитать количество уникальных посетителей в каждом магазине каждый день
+
+SELECT sr.transaction_date,
+       so.store_address,
+       count(DISTINCT c.customer_id)
+FROM sales_reciepts sr
+JOIN sales_outlet so ON sr.sales_outlet_id = so.sales_outlet_id
+JOIN customer c ON sr.customer_id = c.customer_id
+GROUP BY sr.transaction_date,
+         so.store_address
+ORDER BY so.store_address;

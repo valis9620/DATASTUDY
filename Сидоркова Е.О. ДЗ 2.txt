@@ -1,0 +1,86 @@
+-- 1.Создайте таблицы в соответствии с моделью данных. Сначала создаем все справочники с ключами
+ 
+CREATE TABLE region (
+region_id integer PRIMARY KEY,
+region_name text
+);
+
+CREATE TABLE shop (
+shop_id integer PRIMARY KEY,
+region_id integer REFERENCES region(region_id),
+shop_address text,
+shop_working_hours text
+);
+
+CREATE TABLE customer (
+customer_id integer PRIMARY KEY,
+customer_name text,
+gender text,
+phone_number text,
+email text,
+birth_date text,
+loyalty_card text
+);
+
+CREATE TABLE product (
+product_id text PRIMARY KEY,
+product_name text,
+product_category text,
+product_price real
+);
+
+CREATE TABLE sale (
+sale_id integer PRIMARY KEY,
+customer_id integer REFERENCES customer(customer_id),
+shop_id integer REFERENCES shop(shop_id),
+product_id text REFERENCES product(product_id),
+quantity integer,
+discount text
+);
+
+--2. Напишите запрос на добавление в таблицу shop нового поля is_working с типом integer
+
+ALTER TABLE shop ADD COLUMN is_working integer;
+
+--3. Напишите запрос на переименование loyalty_card_id в таблице customer
+
+ALTER TABLE customer RENAME COLUMN loyalty_card TO loyalty_card_id;
+
+--4. Запишите несколько строк данных в таблицу customer как в таблице ниже
+
+INSERT INTO customer (customer_id, customer_name, gender, phone_number, birth_date, loyalty_card_id)
+VALUES (101, 'Иван', 'М', '7937527381', '1995-08-09', '1013811c'),
+	(102, 'Мария', 'Ж', '7382615382', '1998-04-23', '1023821c'),
+	(103, 'Петр', 'М', '7392836153', '1993-03-27', '1031531c');
+		
+--5. Напишите запрос для обновления номера телефона Марии с новым значением 7847362917
+	
+UPDATE customer 
+SET phone_number = '7847362917'
+WHERE customer_name = 'Мария';
+
+--6. Удалите запись из таблицы с customer_id = 103
+
+DELETE FROM customer 
+WHERE customer_id = 103;
+
+--7. Удалите все записи из таблицы customer
+
+DELETE FROM customer;
+
+--8. Напишите запрос чтобы переименовать таблицу sale в transactions
+
+ALTER TABLE sale RENAME TO transactions;
+
+--9. Напишите запрос на удаление поля email из таблицы customer
+
+ALTER TABLE customer DROP COLUMN email;
+
+--10. Напишите запрос на вставку в таблицу customer значений только в поля customer_id и customer_name
+
+INSERT INTO customer (customer_id, customer_name)
+VALUES (101, 'Иван'),
+	(102, 'Мария'),
+	(103, 'Петр');
+	
+	
